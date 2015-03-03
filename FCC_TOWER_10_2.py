@@ -8,6 +8,8 @@
 # -----------------------------------------------------------
 # Edited: Kristen Jordan, July 2014, Kansas Data Access and Support Center, kristen@kgs.ku.edu, 785-864-2132
 # Edits: Added automatic download, unzip, file rename, and file character replacements
+# Edited: Matthew DeLong, February 2015, Arkansas GIS OFfice/Department of Inmformation Systems, 501-682-3710
+# Edits: Removed unzip def and added Zipfile module to unzip files
 # Original code from AGIO (minus original variable settings) starts in line
 # Necessary parameters in ArcGIS script- Target geodatabase, file download location, state abbreviation
 
@@ -32,13 +34,6 @@ def DownloadFCCData(downloadLoc):
 
     return savedZip
 
-def unzip(zipFile, unzipLocation):
-    import os
-    #generage unzip command
-    unzip = r"unzip " + zipFile + r" -d " + unzipLocation
-    print unzip
-    i = runCommand(unzip)
-    return i
 
 def runCommand(command):
     import subprocess
@@ -63,7 +58,7 @@ def inplace_change(filename, old_string, new_string):
 #Any Questions or concerns regarding this script may be directed to Arkansas Geographic Information Office at 501-682-3710
 
 # Import arcpy module
-import arcpy, os, sys
+import arcpy, os, sys, zipfile, shutil
 
 # Script arguments
 FCC_ASR_TOWER_gdb = arcpy.GetParameterAsText(0)
@@ -83,8 +78,11 @@ if savedZip == 0:
     sys.exit()
 
 #unzip file
-unzipFolder = os.path.dirname(savedZip)
-i = unzip(savedZip, unzipFolder)
+zip = zipfile.ZipFile(savedZip)
+zip.extractall(downloadLoc+r"\FCC_TOWER")
+zip.close()
+unzipFolder = downloadLoc+"\FCC_TOWER"
+
 
 #rename CO, EN, RA files
 if os.path.exists(unzipFolder):
@@ -114,6 +112,7 @@ if os.path.exists(unzipFolder):
 
             arcpy.AddMessage("Characters replaced in " + abbr)
 
+
             #flag success as "yay" so the script will continue to process the tower data
             success = 1
 
@@ -126,6 +125,7 @@ else:
     sys.exit()
 
 if success == 1:
+    arcpy.AddMessage("Importing txt files to tables... " )
     #set path names
     CO_txt = os.path.join(unzipFolder, "CO.txt")
     EN_txt = os.path.join(unzipFolder, "EN.txt")
@@ -143,7 +143,7 @@ if success == 1:
     FCC_ASR_TOWER_XY_lyr =FCC_ASR_TOWER_gdb + '\\FCC_ASR_TOWER_XY_lyr'
     FCC_ASR_TOWER_XY = FCC_ASR_TOWER_gdb + '\\FCC_ASR_TOWER_XY'
     FCC_ASR_TOWER_ALL = FCC_ASR_TOWER_gdb + '\\FCC_ASR_TOWER_ALL'
-    FCC_ASR_TOWER_STATE =FCC_ASR_TOWER_gdb + '\\FCC_ASR_TOWER_STATE'
+##    FCC_ASR_TOWER_STATE =FCC_ASR_TOWER_gdb + '\\FCC_ASR_TOWER_'+State
 
 
     arcpy.env.overwriteOutput = True
@@ -166,6 +166,9 @@ if success == 1:
     # Process: Make Table View (3)
     arcpy.MakeTableView_management(FCC_ASR_TOWER_RA, FCC_ASR_TOWER_RA_view, "", FCC_ASR_TOWER_gdb, "REGISTRATION_NUMBER REGISTRATION_NUMBER VISIBLE NONE;UNIQUE_SYSTEM_IDENTIFIER UNIQUE_SYSTEM_IDENTIFIER VISIBLE NONE;DATE_CONSTRUCTED DATE_CONSTRUCTED VISIBLE NONE;DATE_DISMANTLED DATE_DISMANTLED VISIBLE NONE;STRUCTURE_STREET_ADDRESS STRUCTURE_STREET_ADDRESS VISIBLE NONE;STRUCTURE_CITY STRUCTURE_CITY VISIBLE NONE;STRUCTURE_STATE STRUCTURE_STATE VISIBLE NONE;STRUCTURE_COUNTY STRUCTURE_COUNTY VISIBLE NONE;STRUCTURE_ZIP_CODE STRUCTURE_ZIP_CODE VISIBLE NONE;HEIGHT_OF_STRUCTURE HEIGHT_OF_STRUCTURE VISIBLE NONE;GROUND_ELEVATION GROUND_ELEVATION VISIBLE NONE;OVERALL_HEIGHT_ABOVE_GROUND OVERALL_HEIGHT_ABOVE_GROUND VISIBLE NONE;OVERALL_HEIGHT_AMSL OVERALL_HEIGHT_AMSL VISIBLE NONE;STRUCTURE_TYPE STRUCTURE_TYPE VISIBLE NONE;FAA_STUDY_NUMBER FAA_STUDY_NUMBER VISIBLE NONE;FAA_CIRCULAR_NUMBER FAA_CIRCULAR_NUMBER VISIBLE NONE;SPECIFICATION_OPTION SPECIFICATION_OPTION VISIBLE NONE;PAINTING_AND_LIGHTING PAINTING_AND_LIGHTING VISIBLE NONE;MARK_LIGHT_CODE MARK_LIGHT_CODE VISIBLE NONE;MARK_LIGHT_CODE_OTHER MARK_LIGHT_CODE_OTHER VISIBLE NONE")
 
+    arcpy.AddMessage("Import Complete" )
+    arcpy.AddMessage("Indexing and Joining..." )
+
     # Process: Add Attribute Index
     arcpy.AddIndex_management(FCC_ASR_TOWER_CO_view, "UNIQUE_SYSTEM_IDENTIFIER", "CO", "NON_UNIQUE", "NON_ASCENDING")
 
@@ -181,6 +184,8 @@ if success == 1:
     # Process: Add Join (2)
     arcpy.AddJoin_management(FCC_ASR_TOWER_EN_view, "REGISTRATION_NUMBER", FCC_ASR_TOWER_RA_view, "REGISTRATION_NUMBER", "KEEP_ALL")
 
+    arcpy.AddMessage("Copying Join..." )
+
     # Process: Copy Rows
     arcpy.CopyRows_management(FCC_ASR_TOWER_EN_view, FCC_ASR_TOWER_JOIN, "")
 
@@ -192,6 +197,10 @@ if success == 1:
 
     # Process: Delete View
     arcpy.Delete_management(FCC_ASR_TOWER_RA_view, "")
+
+    arcpy.AddMessage("Copy Complete" )
+
+    arcpy.AddMessage("Generating Geometry..." )
 
     # Process: Add Field
     arcpy.AddField_management(FCC_ASR_TOWER_JOIN, "LONG_DMS", "TEXT", "", "", "", "LONG_DMS", "NULLABLE", "NON_REQUIRED", "")
@@ -217,6 +226,7 @@ if success == 1:
     # Process: Calculate Field
     arcpy.CalculateField_management(FCC_ASR_TOWER_XY, "DDLon", "!DDLon!.replace(\"W\", \"\")", "PYTHON_9.3", "")
 
+    arcpy.AddMessage("Geometry Complete" )
 
     cur = arcpy.UpdateCursor(FCC_ASR_TOWER_XY)
     row = cur.next()
@@ -276,11 +286,15 @@ if success == 1:
     # Process: Select Layer By Attribute
     arcpy.SelectLayerByAttribute_management(Metadata_and_schema_lyr, "NEW_SELECTION", "STRUCTURE_STATE_CODE = '" + State + "'")
 
+    arcpy.AddMessage("Exporting State Subset..." )
+
     # Process: Feature Class to Feature Class
-    arcpy.FeatureClassToFeatureClass_conversion(Metadata_and_schema_lyr, FCC_ASR_TOWER_gdb, "FCC_ASR_TOWER_STATE", "", "", "")
+    arcpy.FeatureClassToFeatureClass_conversion(Metadata_and_schema_lyr, FCC_ASR_TOWER_gdb, "FCC_ASR_TOWER_"+State, "", "", "")
 
     # Process: Select Layer By Attribute
     arcpy.SelectLayerByAttribute_management(Metadata_and_schema_lyr, "CLEAR_SELECTION", "")
+
+    arcpy.AddMessage("Exporting Complete Dataset..." )
 
     # Process: Feature Class to Feature Class
     arcpy.FeatureClassToFeatureClass_conversion(Metadata_and_schema_lyr, FCC_ASR_TOWER_gdb, "FCC_ASR_TOWER_ALL", "", "", "")
@@ -291,6 +305,11 @@ if success == 1:
     arcpy.Delete_management(FCC_ASR_TOWER_RA)
     arcpy.Delete_management(FCC_ASR_TOWER_JOIN)
     arcpy.Delete_management(FCC_ASR_TOWER_CO)
+
+    shutil.rmtree(unzipFolder)
+    os.remove(savedZip)
+
+    arcpy.AddMessage("Script Complete" )
 
 
 
